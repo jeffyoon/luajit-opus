@@ -1,5 +1,5 @@
 local ffi = require("ffi")
-local lib = ffi.load("libopus.dll")
+local lib = ffi.load("libopus")
 
 ffi.cdef[[
 /* opus_types.h typedefs */
@@ -82,12 +82,12 @@ local Application = enum {
 }
 
 local Bandwidth = enum {
-	Default = -1000,
-	Narrowband = 1101,
-	Mediumband = 1102,
-	Wideband = 1103,
-	SuperWideband = 1104,
-	Fullband = 1105,
+	Default = -1000, -- fullband
+	Narrowband = 1101, -- 4 kHz
+	Mediumband = 1102, -- 6 KHz
+	Wideband = 1103, -- 8 KHz
+	SuperWideband = 1104, -- 12 KHz
+	Fullband = 1105, -- 20 KHz
 }
 
 local Channel = enum {
@@ -177,8 +177,9 @@ end
 local int_ptr = ffi.typeof("int[1]")
 local opus_int32 = ffi.typeof("opus_int32")
 local opus_int32_ptr = ffi.typeof("opus_int32[1]")
+local opus_int16_size = ffi.sizeof('opus_int16')
 
--- OpusEncoder --
+-- Encoder --
 
 local Encoder = {}
 Encoder.__index = Encoder
@@ -187,7 +188,7 @@ setmetatable(Encoder, {__call = function(self, sample_rate, channels, app)
 
 	app = app or Application.Audio
 
-	local err = int_ptr(0)
+	local err = int_ptr()
 	local state = lib.opus_encoder_create(sample_rate, channels, app, err)
 	if err[0] < 0 then return throw(err[0]) end
 
@@ -198,12 +199,24 @@ setmetatable(Encoder, {__call = function(self, sample_rate, channels, app)
 
 end})
 
+function Encoder:encode(input, frame_size, max_data_bytes)
+
+	local pcm = ffi.new("opus_int16[?]", #input, input)
+	local data = ffi.new("unsigned char[?]", max_data_bytes)
+
+	local ret = lib.opus_encode(self[1], pcm, frame_size, data, max_data_bytes)
+	if ret < 0 then return throw(ret) end
+
+	return ffi.string(data, ret) -- return string or table or both?
+
+end
+
 function Encoder:get(k)
 
 	local id = encoder_get[k]
 	if not id then return throw(-1) end
 
-	local ret = opus_int32_ptr(0)
+	local ret = opus_int32_ptr()
 	lib.opus_encoder_ctl(self[1], id, ret)
 	ret = ret[0]
 
@@ -232,14 +245,14 @@ function Encoder:reset()
 	return ret
 end
 
--- OpusDecoder --
+-- Decoder --
 
 local Decoder = {}
 Decoder.__index = Decoder
 
 setmetatable(Decoder, {__call = function(self, sample_rate, channels)
 
-	local err = int_ptr(0)
+	local err = int_ptr()
 	local state = lib.opus_decoder_create(sample_rate, channels, err)
 	if err[0] < 0 then return throw(err[0]) end
 
@@ -250,12 +263,29 @@ setmetatable(Decoder, {__call = function(self, sample_rate, channels)
 
 end})
 
+function Decoder:decode(input, frame_size, pcm_length, decode_fec)
+
+	local len = opus_int32(#input)
+	local data = ffi.new("unsigned char[?]", len, input)
+	local pcm = ffi.new("opus_int16[?]", pcm_length)
+
+	local ret = lib.opus_decode(self[1], data, len, pcm, frame_size, decode_fec or 0)
+	if ret < 0 then return throw(ret) end
+
+	ret = {}
+	for i = 1, pcm_length do
+		ret[i] = pcm[i - 1]
+	end
+	return ret
+
+end
+
 function Decoder:get(k)
 
 	local id = decoder_get[k]
 	if not id then return throw(-1) end
 
-	local ret = opus_int32_ptr(0)
+	local ret = opus_int32_ptr()
 	lib.opus_decoder_ctl(self[1], id, ret)
 	ret = ret[0]
 
@@ -288,6 +318,7 @@ return {
 	Application = Application,
 	Bandwidth = Bandwidth,
 	Channel = Channel,
+	Decoder = Decoder,
 	Encoder = Encoder,
 	FrameSize = FrameSize,
 	Signal = Signal,
