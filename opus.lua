@@ -177,14 +177,14 @@ end
 local int_ptr = ffi.typeof("int[1]")
 local opus_int32 = ffi.typeof("opus_int32")
 local opus_int32_ptr = ffi.typeof("opus_int32[1]")
-local opus_int16_size = ffi.sizeof('opus_int16')
+local opus_int16_size = ffi.sizeof("opus_int16")
 
 -- Encoder --
 
 local Encoder = {}
 Encoder.__index = Encoder
 
-setmetatable(Encoder, {__call = function(self, sample_rate, channels, app)
+function Encoder:__new(sample_rate, channels, app)
 
 	app = app or Application.Audio
 
@@ -195,52 +195,45 @@ setmetatable(Encoder, {__call = function(self, sample_rate, channels, app)
 	err = lib.opus_encoder_init(state, sample_rate, channels, app)
 	if err < 0 then return throw(err) end
 
-	return setmetatable({state}, self)
+	ffi.gc(state, lib.opus_encoder_destroy)
 
-end})
+	return state
+
+end
 
 function Encoder:encode(input, frame_size, max_data_bytes)
 
 	local pcm = ffi.new("opus_int16[?]", #input, input)
 	local data = ffi.new("unsigned char[?]", max_data_bytes)
 
-	local ret = lib.opus_encode(self[1], pcm, frame_size, data, max_data_bytes)
+	local ret = lib.opus_encode(self, pcm, frame_size, data, max_data_bytes)
 	if ret < 0 then return throw(ret) end
 
-	return ffi.string(data, ret) -- return string or table or both?
+	return ffi.string(data, ret)
 
 end
 
-function Encoder:get(k)
-
-	local id = encoder_get[k]
-	if not id then return throw(-1) end
-
-	local ret = opus_int32_ptr()
-	lib.opus_encoder_ctl(self[1], id, ret)
-	ret = ret[0]
-
-	if ret < 0 and ret ~= -1000 then return throw(ret) end
-	return ret
-
+for name, id in pairs(encoder_get) do
+	Encoder['get_' .. name] = function(self)
+		local ret = opus_int32_ptr()
+		lib.opus_encoder_ctl(self, id, ret)
+		ret = ret[0]
+		if ret < 0 and ret ~= -1000 then return throw(ret) end
+		return ret
+	end
 end
 
-function Encoder:set(k, v)
-
-	local id = encoder_set[k]
-	if not id then return throw(-1) end
-
-	v = tonumber(v)
-	if not v then return throw(-1) end
-	local ret = lib.opus_encoder_ctl(self[1], id, opus_int32(v))
-
-	if ret < 0 and ret ~= -1000 then return throw(ret) end
-	return ret
-
+for name, id in pairs(encoder_set) do
+	Encoder['set_' .. name] = function(self, v)
+		if type(v) ~= 'number' then return throw(-1) end
+		local ret = lib.opus_encoder_ctl(self, id, opus_int32(v))
+		if ret < 0 and ret ~= -1000 then return throw(ret) end
+		return ret
+	end
 end
 
 function Encoder:reset()
-	local ret = lib.opus_encoder_ctl(self[1], 4028)
+	local ret = lib.opus_encoder_ctl(self, 4028)
 	if ret < 0 and ret ~= -1000 then return throw(ret) end
 	return ret
 end
@@ -250,7 +243,7 @@ end
 local Decoder = {}
 Decoder.__index = Decoder
 
-setmetatable(Decoder, {__call = function(self, sample_rate, channels)
+function Decoder:__new(sample_rate, channels)
 
 	local err = int_ptr()
 	local state = lib.opus_decoder_create(sample_rate, channels, err)
@@ -259,9 +252,11 @@ setmetatable(Decoder, {__call = function(self, sample_rate, channels)
 	err = lib.opus_decoder_init(state, sample_rate, channels)
 	if err < 0 then return throw(err) end
 
-	return setmetatable({state}, self)
+	ffi.gc(state, lib.opus_decoder_destroy)
 
-end})
+	return state
+
+end
 
 function Decoder:decode(input, frame_size, pcm_length, decode_fec)
 
@@ -269,48 +264,34 @@ function Decoder:decode(input, frame_size, pcm_length, decode_fec)
 	local data = ffi.new("unsigned char[?]", len, input)
 	local pcm = ffi.new("opus_int16[?]", pcm_length)
 
-	local ret = lib.opus_decode(self[1], data, len, pcm, frame_size, decode_fec or 0)
+	local ret = lib.opus_decode(self, data, len, pcm, frame_size, decode_fec or 0)
 	if ret < 0 then return throw(ret) end
 
-	-- ret = {}
-	-- for i = 1, pcm_length do
-	-- 	ret[i] = pcm[i - 1]
-	-- end
-	-- return ret
 	return ffi.string(pcm, pcm_length)
 
 end
 
-function Decoder:get(k)
-
-	local id = decoder_get[k]
-	if not id then return throw(-1) end
-
-	local ret = opus_int32_ptr()
-	lib.opus_decoder_ctl(self[1], id, ret)
-	ret = ret[0]
-
-	if ret < 0 and ret ~= -1000 then return throw(ret) end
-	return ret
-
+for name, id in pairs(decoder_get) do
+	Decoder['get_' .. name] = function(self)
+		local ret = opus_int32_ptr()
+		lib.opus_decoder_ctl(self, id, ret)
+		ret = ret[0]
+		if ret < 0 and ret ~= -1000 then return throw(ret) end
+		return ret
+	end
 end
 
-function Decoder:set(k, v)
-
-	local id = decoder_set[k]
-	if not id then return throw(-1) end
-
-	v = tonumber(v)
-	if not v then return throw(-1) end
-	local ret = lib.opus_decoder_ctl(self[1], id, opus_int32(v))
-
-	if ret < 0 and ret ~= -1000 then return throw(ret) end
-	return ret
-
+for name, id in pairs(decoder_set) do
+	Decoder['set_' .. name] = function(self, v)
+		if type(v) ~= 'number' then return throw(-1) end
+		local ret = lib.opus_decoder_ctl(self, id, opus_int32(v))
+		if ret < 0 and ret ~= -1000 then return throw(ret) end
+		return ret
+	end
 end
 
 function Decoder:reset()
-	local ret = lib.opus_decoder_ctl(self[1], 4028)
+	local ret = lib.opus_decoder_ctl(self, 4028)
 	if ret < 0 and ret ~= -1000 then return throw(ret) end
 	return ret
 end
@@ -319,8 +300,8 @@ return {
 	Application = Application,
 	Bandwidth = Bandwidth,
 	Channel = Channel,
-	Decoder = Decoder,
-	Encoder = Encoder,
+	Decoder = ffi.metatype("OpusDecoder", Decoder),
+	Encoder = ffi.metatype("OpusEncoder", Encoder),
 	FrameSize = FrameSize,
 	Signal = Signal,
 }
